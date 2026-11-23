@@ -94,7 +94,7 @@ class EnrichJoinService(BaseModuleService):
             enriched.append(entry)
 
         output_file = self._data_dir("logs") / f"{source_key}_enriched.jsonl"
-        written = self._write_jsonl(output_file, enriched)
+        written = self._replace_jsonl(output_file, enriched)
 
         self._write_checkpoint(f"enrich_{source_key}", {
             "total": len(records), "enriched": written,

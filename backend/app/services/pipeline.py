@@ -16,6 +16,7 @@ from app.services.collect_checkpoint import CollectCheckpointService
 from app.services.backfill_range import BackfillRangeService
 from app.services.log_rotate import LogRotateService
 from app.services.log_partition import LogPartitionService
+from app.services.partition_migration import PartitionMigrationService
 from app.services.enrich_join import EnrichJoinService
 from app.services.aggregate_olap import AggregateOlapService
 from app.services.alert_rule import AlertRuleService
@@ -41,6 +42,7 @@ class CrossModulePipeline:
         self.backfill_range = BackfillRangeService()
         self.log_rotate = LogRotateService()
         self.log_partition = LogPartitionService()
+        self.partition_migration = PartitionMigrationService()
         self.enrich_join = EnrichJoinService()
         self.aggregate_olap = AggregateOlapService()
         self.alert_rule = AlertRuleService()
@@ -230,8 +232,13 @@ class CrossModulePipeline:
         results["duration"] = round(time.time() - started_at, 2)
         return results
 
-    def rotate_partition_pipeline(self, source_key: str) -> dict[str, Any]:
-        """轮转+分区管道：轮转日志 -> 分区路由 -> 归并。"""
+    def rotate_partition_pipeline(
+        self,
+        source_key: str,
+        migrate_fraction: float = 0.0,
+        new_archive_count: int = 0,
+    ) -> dict[str, Any]:
+        """轮转+分区管道：轮转日志 -> 分区路由 -> 按迁移清单核对布局 -> 归并明细。"""
         started_at = time.time()
         results = {"pipeline": "rotate_partition", "stages": {}}
 
@@ -248,15 +255,42 @@ class CrossModulePipeline:
         rotate_r = self.log_rotate.rotate_source(source_key)
         results["stages"]["rotate"] = rotate_r
 
-        # 阶段3: 分区路由
+        # 阶段3: 分区路由（一代布局，按源前缀平铺）
         partition_r = self.log_partition.partition_source(source_key)
         results["stages"]["partition"] = partition_r
 
-        # 阶段4: 分区归并
-        merge_r = self.log_partition.merge_partitions(source_key)
+        # 阶段4: 一代 -> 二代迁移清单，供上线期核对
+        manifest_r = self.partition_migration.ensure_manifest(source_key, refresh=True)
+        results["stages"]["manifest"] = {
+            "manifest_id": manifest_r["manifest_id"],
+            "manifest_file": self.partition_migration._rel(
+                self.partition_migration._manifest_path(source_key)),
+            "effective_layout": manifest_r["effective_layout"],
+            "generations_present": manifest_r["generations_present"],
+            "files": len(manifest_r["files"]),
+        }
+
+        # 阶段5: 可选的快照、迁移与新归档（默认不迁移，保持旧布局行为）
+        if migrate_fraction > 0:
+            results["stages"]["snapshot"] = self.partition_migration.capture_snapshot(
+                source_key, "history", refresh=True)
+            results["stages"]["migrate"] = self.partition_migration.migrate(
+                source_key, fraction=migrate_fraction)
+        if new_archive_count > 0:
+            results["stages"]["new_archive"] = self.partition_migration.record_new_archive(
+                source_key, count=new_archive_count)
+
+        # 阶段6: 按清单核对迁移后的有效布局与具体文件
+        layout_r = self.partition_migration.check_layout(source_key)
+        results["stages"]["layout_check"] = layout_r
+
+        # 阶段7: 归并成可复查的明细（带证据文件与行集合摘要）
+        merge_r = self.partition_migration.merge_with_evidence(
+            source_key, mode="current", label="rotate-partition")
         results["stages"]["merge"] = merge_r
 
         results["duration"] = round(time.time() - started_at, 2)
+        results["ready"] = layout_r["ready"] and merge_r["output_records"] == merge_r["unique_records"]
         return results
 
     def agent_checkpoint_pipeline(self, agent_code: str) -> dict[str, Any]:

@@ -58,10 +58,10 @@ class DedupWindowService(BaseModuleService):
                 kept.append(rec)
 
         deduped_file = self._data_dir("logs") / f"{source_key}_deduped.jsonl"
-        written = self._write_jsonl(deduped_file, kept)
+        written = self._replace_jsonl(deduped_file, kept)
 
         if duplicates:
-            self._write_jsonl(
+            self._replace_jsonl(
                 self._data_dir("logs") / f"{source_key}_duplicates.jsonl",
                 duplicates
             )

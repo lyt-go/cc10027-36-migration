@@ -32,7 +32,7 @@ class FormatOutputService(BaseModuleService):
 
         if format_type == "jsonl":
             output_file = exports_dir / f"{source_key}_export.jsonl"
-            written = self._write_jsonl(output_file, records)
+            written = self._replace_jsonl(output_file, records)
 
         elif format_type == "json":
             output_file = exports_dir / f"{source_key}_export.json"

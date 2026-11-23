@@ -47,7 +47,7 @@ class SamplingRuleService(BaseModuleService):
         sampled = self._apply_sampling(records, sample_method, sample_rate, source_key)
 
         output_file = self._data_dir("logs") / f"{source_key}_sampled.jsonl"
-        written = self._write_jsonl(output_file, sampled)
+        written = self._replace_jsonl(output_file, sampled)
 
         self._write_checkpoint(f"sample_{source_key}", {
             "total": len(records), "sampled": written,

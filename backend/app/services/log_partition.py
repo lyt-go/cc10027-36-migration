@@ -42,7 +42,8 @@ class LogPartitionService(BaseModuleService):
         for key, part_records in partitions.items():
             safe_key = key.replace("/", "_").replace(":", "_")
             out_file = partition_dir / f"{source_key}_{safe_key}.jsonl"
-            self._write_jsonl(out_file, part_records)
+            # 覆盖写：同一批解析数据重复分区时不会把整段再追加一遍。
+            self._replace_jsonl(out_file, part_records)
             partition_list.append({"key": key, "count": len(part_records), "file": str(out_file)})
             written += len(part_records)
 

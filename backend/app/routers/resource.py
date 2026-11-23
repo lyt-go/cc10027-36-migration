@@ -138,9 +138,104 @@ def run_dedup_sample_pipeline(source_key: str) -> dict[str, Any]:
 
 
 @router.post("/pipelines/rotate-partition/{source_key}")
-def run_rotate_partition_pipeline(source_key: str) -> dict[str, Any]:
-    """执行轮转+分区管道：轮转 -> 分区路由 -> 归并。"""
-    return pipeline.rotate_partition_pipeline(source_key)
+def run_rotate_partition_pipeline(
+    source_key: str,
+    migrate_fraction: float = Query(default=0.0, ge=0.0, le=1.0),
+    new_archive_count: int = Query(default=0, ge=0, le=1000),
+) -> dict[str, Any]:
+    """执行轮转+分区管道：轮转 -> 分区路由 -> 迁移清单核对 -> 带证据归并。"""
+    return pipeline.rotate_partition_pipeline(
+        source_key, migrate_fraction=migrate_fraction, new_archive_count=new_archive_count)
+
+
+@router.get("/partition-migration/{source_key}/manifest")
+def get_partition_manifest(source_key: str, refresh: bool = Query(default=True)) -> dict[str, Any]:
+    """读取/刷新分区文件一代到二代迁移清单。"""
+    return pipeline.partition_migration.ensure_manifest(source_key, refresh=refresh)
+
+
+@router.get("/partition-migration/{source_key}/layout")
+def check_partition_layout(source_key: str) -> dict[str, Any]:
+    """按迁移清单核对有效布局和具体文件。"""
+    return pipeline.partition_migration.check_layout(source_key)
+
+
+@router.post("/partition-migration/{source_key}/migrate")
+def migrate_partition_layout(
+    source_key: str,
+    fraction: float = Query(default=0.5, ge=0.0, le=1.0),
+    batch_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """把指定比例的存量分区文件复制到二代布局，存量保留。"""
+    return pipeline.partition_migration.migrate(source_key, fraction=fraction, batch_id=batch_id)
+
+
+@router.post("/partition-migration/{source_key}/snapshot")
+def snapshot_partition_history(
+    source_key: str,
+    name: str = Query(default="history"),
+    refresh: bool = Query(default=False),
+) -> dict[str, Any]:
+    """记录当前一代文件字节范围与二代批次集合，供历史范围归并。"""
+    return pipeline.partition_migration.capture_snapshot(source_key, name=name, refresh=refresh)
+
+
+@router.post("/partition-migration/{source_key}/new-archive")
+def ingest_new_archive(
+    source_key: str,
+    count: int = Query(default=4, ge=0, le=1000),
+    batch_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """布局上线期间把新归档写入二代批次。"""
+    return pipeline.partition_migration.record_new_archive(
+        source_key, count=count, batch_id=batch_id)
+
+
+@router.get("/partition-migration/{source_key}/merge")
+def merge_partition_layout(
+    source_key: str,
+    mode: str = Query(default="current", pattern="^(legacy|history|current|restore)$"),
+    snapshot: str | None = Query(default=None),
+    label: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """按代次归并并写出明细与证据（legacy/history/current/restore）。"""
+    return pipeline.partition_migration.merge_with_evidence(
+        source_key, mode=mode, snapshot_name=snapshot, label=label)
+
+
+@router.get("/partition-migration/{source_key}/lookup")
+def lookup_partition_record(source_key: str, record_id: str) -> dict[str, Any]:
+    """按记录键回查两代布局中的位置，并校验能否回查原键与原记录。"""
+    result = pipeline.partition_migration.lookup_record(source_key, record_id)
+    if not result["found"]:
+        raise HTTPException(status_code=404, detail=f"记录 {record_id} 在两代布局中均未找到")
+    return result
+
+
+@router.get("/partition-migration/{source_key}/generations")
+def queryable_generations(source_key: str) -> dict[str, Any]:
+    """返回当前可查询的代次和每个分区键的布局覆盖。"""
+    return pipeline.partition_migration.queryable_generations(source_key)
+
+
+@router.get("/partition-migration/{source_key}/compare")
+def compare_partition_layouts(
+    source_key: str,
+    snapshot: str = Query(default="history"),
+) -> dict[str, Any]:
+    """对比迁移中、恢复后与回退路径的行集合及可查代次。"""
+    return pipeline.partition_migration.compare_layouts(source_key, snapshot_name=snapshot)
+
+
+@router.post("/partition-migration/{source_key}/drill")
+def run_partition_layout_drill(
+    source_key: str,
+    fraction: float = Query(default=0.5, ge=0.0, le=1.0),
+    new_archive_count: int = Query(default=4, ge=0, le=1000),
+) -> dict[str, Any]:
+    """完整演练：旧布局归并 -> 保留存量 -> 迁移一半 -> 新归档 -> 三路径对比。"""
+    return pipeline.partition_migration.run_layout_drill(
+        source_key, fraction=fraction, new_archive_count=new_archive_count)
 
 
 @router.post("/pipelines/agent-checkpoint/{agent_code}")

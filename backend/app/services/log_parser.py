@@ -39,10 +39,11 @@ class LogParserService(BaseModuleService):
                 parsed.append(parsed_entry)
 
         output_file = self._data_dir("logs") / f"{source_key}_parsed.jsonl"
-        written = self._write_jsonl(output_file, parsed)
+        # 覆盖写：重复触发解析不应把同一段日志再追加一遍。
+        written = self._replace_jsonl(output_file, parsed)
 
         if errors:
-            self._write_jsonl(
+            self._replace_jsonl(
                 self._data_dir("logs") / f"{source_key}_parse_errors.jsonl",
                 errors
             )

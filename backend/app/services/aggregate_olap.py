@@ -49,7 +49,7 @@ class AggregateOlapService(BaseModuleService):
             results[agg_key] = agg_output
 
         output_file = self._data_dir("aggregations") / f"{source_key}_aggregated.json"
-        written = self._write_jsonl(
+        written = self._replace_jsonl(
             self._data_dir("aggregations") / f"{source_key}_aggregated.jsonl",
             [{"aggregation": v, "source_key": source_key} for v in results.values()]
         )

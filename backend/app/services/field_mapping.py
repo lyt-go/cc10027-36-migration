@@ -33,7 +33,7 @@ class FieldMappingService(BaseModuleService):
             mapped.append(mapped_entry)
 
         output_file = self._data_dir("logs") / f"{source_key}_mapped.jsonl"
-        written = self._write_jsonl(output_file, mapped)
+        written = self._replace_jsonl(output_file, mapped)
 
         self._write_checkpoint(f"{source_key}_map", {
             "total": len(records),

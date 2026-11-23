@@ -129,6 +129,17 @@ class BaseModuleService:
                         continue
         return records
 
+    def _replace_jsonl(self, filepath: Path, records: list[dict[str, Any]]) -> int:
+        """覆盖写一个派生产物（解析/映射/分区结果），避免重复触发时追加重复行。"""
+        _ensure_dir(filepath.parent)
+        tmp = filepath.with_suffix(filepath.suffix + ".tmp")
+        written = 0
+        with open(tmp, "w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+                written += 1
+        tmp.replace(filepath)
+        return written
     def _write_checkpoint(self, name: str, state: dict[str, Any]) -> Path:
         p = self._data_dir("checkpoints")
         cp_file = p / f"{name}.json"
